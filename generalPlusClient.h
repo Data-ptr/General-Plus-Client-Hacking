@@ -90,7 +90,7 @@ You can use VLC to play/record/etc. with it
 
 #define CMD_LEN         (2)
 #define NUM_CMDS        (8)
-#define NUM_KNOWN_CMDS  (7)
+#define NUM_KNOWN_CMDS  (8)
 
 /* These are the 13 and 14th bytes in messages of the MENU_CMD types */
 // Expect another message with menu file data.
@@ -328,7 +328,7 @@ CmdMessageTypes cpt[NUM_KNOWN_CMDS] = {
         18,
         14,
         14,
-        { CONF_GET_CMD }
+        { CONF_SET_CMD }
     }
 };
 
