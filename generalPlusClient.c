@@ -15,12 +15,20 @@ const char tokenRaw[TOK_LEN] = SOCKET_TOK;
 
 
 /** Main() **/
-int main() {
+int main(int argc, char* argv[]) {
     int                conn_s;                    /*  connection socket         */
     short  int         port      = DEFAULT_PORT;  /*  port number               */
     struct sockaddr_in servaddr;                  /*  socket address structure  */
     char              *szAddress = DEFAULT_ADDR;  /*  Holds remote IP address   */
     char              *szPort;                    /*  Holds remote port         */
+
+    struct arguments arguments;
+
+    arguments.remoteAddress = DEFAULT_ADDR;
+    arguments.remotePort    = DEFAULT_PORT;
+    arguments.relay         = false;
+
+    argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
     printf("Creating socket...\n");
 

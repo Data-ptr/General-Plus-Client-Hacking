@@ -20,6 +20,9 @@ You can use VLC to play/record/etc. with it
 #include <stdio.h>
 #include <poll.h>
 
+#include <argp.h>
+#include <stdbool.h>
+
 
 /* Message layout */
 /*
@@ -334,7 +337,7 @@ CmdMessageTypes cpt[NUM_KNOWN_CMDS] = {
 
 
 /** Function definitions **/
-int         main();
+int         main(int argc, char* argv[]);
 int         heloMessage(int sock);
 int         menuMessage(int sock);
 
@@ -353,3 +356,36 @@ u_int       appendBytes(char* outBuffer, const char* bytesIn, u_int byteLen);
 int         checkBytes(char* buffer, msgSects msgSect, char* bytesStart);
 int         msgLoop(int sock, Message msg, u_int bufferOutSize);
 int         loop(int sock);
+
+
+/** Arguments stuff **/
+const char *argp_program_version = "Generalplus Client v0.0.1";
+const char *argp_program_bug_address = "<janehacker1@gmail.com>";
+static char doc[] = "Jane Hacker (2020) - janehacker.com\nGeneralplus camera chip network commands hacking, using MountDog Action cam,\nshould also apply to the SQXX (SQ8, SQ10, etc.) cube cams, and more....";
+static char args_doc[] = "[FILENAME]...";
+static struct argp_option options[] = {
+    { "relay", 'r', 0, 0, "Become a relay between the app and the camera."},
+    { "rmtaddr", 'h', 0, 0, "Remote (camera) IP address. *default DEFAULT_ADDR"},
+    { "rmtport", 'p', 0, 0, "Remote (camera) port *default DEFAULT_PORT."},
+    { 0 }
+};
+
+struct arguments {
+    bool        relay;
+    char        *remoteAddress;
+    short int   remotePort;
+};
+
+static error_t parse_opt(int key, char *arg, struct argp_state *state) {
+    struct arguments *arguments = state->input;
+    switch (key) {
+        case 'r': arguments->relay = true; break;
+        case 'h': arguments->remoteAddress = arg; break;
+        case 'p': arguments->remotePort = atoi(arg); break;
+        case ARGP_KEY_ARG: return 0;
+        default: return ARGP_ERR_UNKNOWN;
+    }
+    return 0;
+}
+
+static struct argp argp = { options, parse_opt, args_doc, doc, 0, 0, 0 };
