@@ -32,19 +32,44 @@ ssize_t constructMessage(Message msg, char* outBuffer){
 
 /* Pretty prints message struct data */
 void inspectMessage(const char * pd, size_t pdLen) {
+    char        currByte        = '\0';
     // Make empty Message struct, decode packet data into it
-    Message*  decodedMessage   = decodeMessage(pd, pdLen);
+    Message    *decodedMessage  = decodeMessage(pd, pdLen);
 
     if(NULL != decodedMessage) {
-        printf("\nToken:\t%s\nxmit:\t%s\ncmd:\t%s\nsubCmd:\t%s\ndatalen:%d\n\n",
+        printf("\n\
+Token:\t%s\n\
+xmit:\t%s\n\
+cmd:\t%s\t{ 0x%x, 0x%x }\n\
+subCmd:\t%s\t{ 0x%x, 0x%x }\n\
+datalen:\t%d\n",
             tokStrings[decodedMessage->token],
             xmitStrings[decodedMessage->xmit],
+
             cmdStrings[decodedMessage->cmd],
+            decodedMessage->cmdRaw[0], decodedMessage->cmdRaw[1],
+
             subCmdStrings[decodedMessage->subCmd],
+            decodedMessage->subCmdRaw[0], decodedMessage->subCmdRaw[1],
+
             decodedMessage->dataLen
         );
 
-        //TODO: Examine the data
+        if(decodedMessage->dataLen > 0) {
+            printf("Data:\n{\n");
+
+            for(int i = 0; i < decodedMessage->dataLen; i++) {
+                currByte = decodedMessage->data[i];
+
+                char asciiChar[3] = { '"', currByte, '"' };
+
+                printf("0x%x %s %c", currByte, (currByte > 32 && currByte < 126 ? asciiChar : "   "), (!i || i % 5 ? '\t' : '\n'));
+            }
+
+            printf("\n}\n\n");
+        } else {
+            printf("\n");
+        }
 
         if(NULL != decodedMessage->data) {
             free(decodedMessage->data);
@@ -52,7 +77,7 @@ void inspectMessage(const char * pd, size_t pdLen) {
 
         free(decodedMessage);
     } else {
-        printf("decodeMessage returned NULL\n\n");
+        //printf("decodeMessage returned NULL\n\n");
     }
 }
 
@@ -82,7 +107,7 @@ Message* decodeMessage(const char * pd, size_t pdLen) {
 
 
     if(NULL == tokenStart) {
-        printf("No token in message\n");
+        //printf("No token in message\n");
         return NULL;
     } else {
         // Does the message contain enough data for a token and data bytes?
@@ -121,8 +146,10 @@ Message* decodeMessage(const char * pd, size_t pdLen) {
                 printf("ERROR: Message command type returned: %d", cmd);
             }
 
+            memcpy(sp->cmdRaw, cmdStart, XMIT_LEN);
+
             // Is there subcmd
-            if(pdLen >= MSG_LEN_MIN + SUBCMD_LEN) {
+            if(pdLen >= MSG_LEN_MIN + CMD_LEN + SUBCMD_LEN) {
                 // Check type of subcommand (response)
                 int subcmd = checkBytes(subCmdBuf, SUBCOMMAND, subCmdStart);
 
@@ -130,23 +157,14 @@ Message* decodeMessage(const char * pd, size_t pdLen) {
                     sp->subCmd = subcmd;
                 } else {
                     printf("ERROR: Message sub-command type returned: %d", subcmd);
+                    sp->subCmd = SUBCMD_UNKNOWN;
                 }
 
-                /*
-                memcpy(subCmdBuf, subCmdStart, SUBCMD_LEN); // Load buffer
-
-                for(int i = 1; i < NUM_SUBCMDS; i++) {
-                    if(0 == memcmp(subCmdBuf, subCmdBytes[i], SUBCMD_LEN)) {
-                        sp->subCmd = i;
-                        //printf("\nSetting subcommand as: %s\n", subCmdStrings[i]);
-                        break;
-                    }
-                }
-                */
+                memcpy(sp->subCmdRaw, subCmdStart, SUBCMD_LEN);
             }
 
-            if(pdLen > MSG_LEN_MIN + SUBCMD_LEN) {
-                sp->dataLen = pdLen - MSG_LEN_MIN; //TODO: this is wrong data length [case no subcommands] (Get length of remaining data)
+            if(pdLen > MSG_LEN_MIN + CMD_LEN + SUBCMD_LEN) {
+                sp->dataLen = pdLen - (MSG_LEN_MIN + CMD_LEN + SUBCMD_LEN); //TODO: Recheck
                 sp->data    = calloc(sp->dataLen, sizeof(char));    // Allocate buffer
 
                 // Store the data

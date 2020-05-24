@@ -5,6 +5,7 @@
  */
 
 #include "generalPlusClient.h"
+#include "generalPlusAppHelpers.c"
 #include "generalPlusMsgLib.c"
 #include "generalPlusMsgHelpers.c"
 #include "lowLevelMessageXmit.c"
@@ -16,31 +17,133 @@ const char tokenRaw[TOK_LEN] = SOCKET_TOK;
 
 /** Main() **/
 int main(int argc, char* argv[]) {
-    int                conn_s;                    /*  connection socket         */
-    short  int         port      = DEFAULT_PORT;  /*  port number               */
-    struct sockaddr_in servaddr;                  /*  socket address structure  */
-    char              *szAddress = DEFAULT_ADDR;  /*  Holds remote IP address   */
-    char              *szPort;                    /*  Holds remote port         */
+    int                 conn_c;                 /*  connection socket (client)*/
+    int                 conn_s;                 /*  connection socket (server)*/
+    struct arguments    arguments;
 
-    struct arguments arguments;
-
+    /* Default arguments */
+    arguments.relay         = false;
     arguments.remoteAddress = DEFAULT_ADDR;
     arguments.remotePort    = DEFAULT_PORT;
-    arguments.relay         = false;
+    arguments.localAddress  = DEFAULT_LOCAL_ADDR;
+    arguments.localPort     = DEFAULT_PORT;
 
+    printf("\n\nDEFAULT Arguments:\n");
+    inspectArguments(&arguments);
+
+    /* Set arguments */
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
-    printf("Creating socket...\n");
+    printf("\n\nUsing Arguments:\n");
+    inspectArguments(&arguments);
 
-    if( (conn_s = socket(AF_INET, SOCK_STREAM, 0)) < 0 ) {
-	       fprintf(stderr, "GPCLIENT: Error creating listening socket.\n");
+    /* If a relay, wait for app to connect */
+    if(arguments.relay) {
+        conn_s = setupSocket(conn_s, arguments.localAddress, arguments.localPort, SERVER);
+
+        /* Setup socket for client */
+        conn_c = setupSocket(conn_c, arguments.remoteAddress, arguments.remotePort, CLIENT);
+
+        /* Tie conn_s to conn_c while inspectig messages */
+        return relay(conn_s, conn_c);
+    } else {
+        /* Setup socket for client */
+        conn_c = setupSocket(conn_c, arguments.remoteAddress, arguments.remotePort, CLIENT);
+
+        // Send HELO message
+        heloMessage(conn_c);
+
+        // Send Menu message
+        return menuMessage(conn_c);
+    }
+}
+
+int relay(int connS, int connC) {
+    u_int   endData         = 0;
+    ssize_t bytesRead       = 0;
+    ssize_t bytesWritten    = 0;
+    ssize_t msgInLen        = 256;
+    u_int   bufferInSize    = 256;
+
+    char    bufferIn[bufferInSize];
+
+    int     rXtX = 0;
+
+    //Check
+    if(0 < connS && 0 < connC) {
+        while(true) {
+            // null byte out buffer
+            memset(bufferIn, '\0', bufferInSize);
+
+            //Read
+            bytesRead   = readMessage(rXtX ? connC : connS, bufferIn, msgInLen, &endData);
+
+            //Inspect
+            if(bytesRead > 0) {
+                printf("Incomming message:\n");
+                inspectMessage(bufferIn, bytesRead - 1);
+
+                bytesWritten    = writeMessage(rXtX ? connS : connC, bufferIn, bytesRead - 1);
+
+
+                if(bytesWritten > 0) {
+                    printf("Relayed message\n");
+                    inspectMessage(bufferIn, bytesWritten);
+                } else {
+                    printf("\n\nNo bytes written!\n\n");
+                    //return EXIT_FAILURE;
+                }
+
+            } else {
+                printf("\n\nNo bytes read!\n\n");
+                return EXIT_FAILURE;
+            }
+
+            rXtX = !rXtX;
+        }
+        //Write
+        exit(EXIT_SUCCESS);
+    } else {
+        exit(EXIT_FAILURE);
+    }
+}
+
+int setupSocket(int conn, char *szAddress, short int port, SocketType st) {
+    struct sockaddr_in  addr;                     /*  socket address structure*/
+    struct sockaddr     retAddr;                  /*  socket address structure*/
+    socklen_t           addrLen     = sizeof(addr);
+    socklen_t           retAddrLen  = sizeof(retAddr);
+    char               *szPort;                   /*  Holds remote port       */
+    bool                isClient    = (CLIENT == st);
+
+    printf("Setting up address struct...\t");
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family      = AF_INET;
+    addr.sin_port        = htons(port);
+
+    printf("Done\n");
+
+    printf("Setting IP address in socket...\t");
+
+    if(inet_aton(szAddress, &addr.sin_addr) <= 0 ) {
+        printf("GPCLIENT: Invalid remote IP address.\n");
+        exit(EXIT_FAILURE);
     }
 
-    if(-1 == conn_s) {
+    printf("Done\n");
+
+    printf("Creating %s socket...\t", isClient ? "client" : "server" );
+
+    if( (conn = socket(AF_INET, SOCK_STREAM, 0)) < 0 ) {
+           fprintf(stderr, "GPCLIENT: Error creating listening socket.\n");
+    }
+
+    if(-1 == conn) {
         printf("Checking socket creation error...\n");
 
         //Socket error
-        printf("Error: unable to create socket %d", conn_s);
+        printf("Error: unable to create socket %d", conn);
 
         switch(errno) {
             case EPROTONOSUPPORT:
@@ -57,31 +160,55 @@ int main(int argc, char* argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Setting up server address struct...\n");
+    printf("Done\n");
 
-    memset(&servaddr, 0, sizeof(servaddr));
-    servaddr.sin_family      = AF_INET;
-    servaddr.sin_port        = htons(port);
+    if(isClient) {
+        /* Client */
+        printf("Connecting to camera...\t\t");
 
-    printf("Setting server's IP address in socket...\n");
+        if(connect(conn, (struct sockaddr *) &addr, addrLen) < 0) {
+            printf("GPCLIENT: Error calling connect(); errno = %i; %s\n", errno, inet_ntoa(addr.sin_addr));
+            exit(EXIT_FAILURE);
+        }
 
-    if(inet_aton(szAddress, &servaddr.sin_addr) <= 0 ) {
-    	printf("GPCLIENT: Invalid remote IP address.\n");
-    	exit(EXIT_FAILURE);
+        printf("Done\n");
+    } else {
+        /* Server */
+        printf("BINDing server to address...\t");
+
+        while(-1 == bind(conn, (struct sockaddr *) &addr, addrLen)) {
+            if(48 == errno) {
+                printf("\n Trying again...\t");
+                sleep(10);
+            } else {
+                // Error: unable to bind...
+                printf("GPCLIENT: Error calling bind(); errno = %i; %s\n", errno, inet_ntoa(addr.sin_addr));
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        printf("Done\n");
+
+        if(listen(conn, MAX_SERV_CONS) == -1) {
+            // Error...
+            printf("GPCLIENT: Error calling listen()\n");
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Waiting for app to connect...\twaiting...\t");
+
+        conn = accept(conn, &retAddr, &retAddrLen);
+
+        if (conn == -1) {
+            // Error...
+            printf("GPCLIENT: Error calling accept()\n");
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Done\n");
     }
 
-    printf("Connecting to server...\n");
-
-    if(connect(conn_s, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0 ) {
-    	printf("GPCLIENT: Error calling connect(); errno = %i; %s\n", errno, inet_ntoa(servaddr.sin_addr));
-    	exit(EXIT_FAILURE);
-    }
-
-    // Send HELO message
-    heloMessage(conn_s);
-
-    // Send Menu message
-    return menuMessage(conn_s);
+    return conn;
 }
 
 //TODO: make msgSingle function that is called from here
@@ -107,7 +234,9 @@ int heloMessage(int sock) {
         SOCKET,
         TX,
         HELO,
+        "\0\0",
         HELO_TX,
+        "\0\0",
         heloData,
         HELO_DATA_SIZ
     };
@@ -145,7 +274,9 @@ int menuMessage(int sock) {
         SOCKET,
         TX,
         MENUFILE,
+        "\0\0",
         SUBCMD_UNKNOWN,
+        "\0\0",
         NULL,
         0
     };
